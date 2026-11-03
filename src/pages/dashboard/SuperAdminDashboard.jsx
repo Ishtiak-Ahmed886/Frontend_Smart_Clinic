@@ -159,7 +159,7 @@ export default function SuperAdminDashboard() {
           </h1>
           <p className="text-sm text-base-content/60 mt-1">Full system overview — verify clinics/doctors, manage platform data</p>
         </div>
-        <div className="badge badge-error badge-lg">SUPER ADMIN</div>
+        <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-black tracking-wider bg-[#1e3a8a] text-white shadow-sm">SUPER ADMIN</div>
       </div>
 
       {/* Alerts */}
