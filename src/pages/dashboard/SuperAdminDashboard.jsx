@@ -23,9 +23,6 @@ export default function SuperAdminDashboard() {
   // Forms
   const [newDept, setNewDept] = useState({ name: "", description: "" });
   const [newSpec, setNewSpec] = useState({ name: "", description: "" });
-  const [assignForm, setAssignForm] = useState({
-    doctor_id: "", clinic_id: "", department_id: "", consultation_fee: "", room_number: "",
-  });
 
   const loadData = async () => {
     setLoading(true);
@@ -108,20 +105,6 @@ export default function SuperAdminDashboard() {
     }
   };
 
-  const handleAssignDoctor = async (e) => {
-    e.preventDefault();
-    try {
-      await apiClient.post(`/doctors/${assignForm.doctor_id}/assign-clinic/`, {
-        clinic_id: assignForm.clinic_id,
-        department_id: assignForm.department_id || null,
-        consultation_fee: parseFloat(assignForm.consultation_fee),
-        room_number: assignForm.room_number || "",
-      });
-      showMsg("Doctor assigned to clinic.");
-      setAssignForm({ doctor_id: "", clinic_id: "", department_id: "", consultation_fee: "", room_number: "" });
-      loadData();
-    } catch { showErr("Failed to assign doctor."); }
-  };
 
   const pendingClinics = clinics.filter(c => c.verification_status === "PENDING");
   const pendingDoctors = doctors.filter(d => d.verification_status === "PENDING");
@@ -487,7 +470,10 @@ export default function SuperAdminDashboard() {
                         <span className="flex items-center gap-1"><Clock size={13} className="text-primary" /> {apt.appointment_time}</span>
                       </div>
                     </div>
-                    <div className="text-primary font-extrabold text-lg shrink-0">${apt.amount}</div>
+                    <div className="text-right shrink-0">
+                      <div className="text-[#1e3a8a] font-black text-base">৳{apt.amount || 0}</div>
+                      <span className="text-[10px] text-slate-400 font-medium">EMR Confidential</span>
+                    </div>
                   </div>
                 </div>
               ))}
