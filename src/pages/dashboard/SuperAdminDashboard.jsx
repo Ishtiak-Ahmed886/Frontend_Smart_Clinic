@@ -15,6 +15,13 @@ export default function SuperAdminDashboard() {
   const [departments, setDepartments] = useState([]);
   const [specializations, setSpecializations] = useState([]);
   const [appointments, setAppointments] = useState([]);
+  const [totalAppointmentsCount, setTotalAppointmentsCount] = useState(0);
+  const [appointmentStats, setAppointmentStats] = useState({
+    PENDING: 0,
+    CONFIRMED: 0,
+    COMPLETED: 0,
+    CANCELLED: 0,
+  });
 
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
@@ -27,18 +34,39 @@ export default function SuperAdminDashboard() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [cRes, dRes, deptRes, specRes, aptRes] = await Promise.all([
+      const [cRes, dRes, deptRes, specRes, aptRes, statsRes] = await Promise.all([
         apiClient.get("/clinics/"),
         apiClient.get("/doctors/"),
         apiClient.get("/clinics/departments/"),
         apiClient.get("/doctors/specializations/"),
         apiClient.get("/appointments/"),
+        apiClient.get("/appointments/stats/summary/").catch(() => null),
       ]);
-      setClinics(cRes.results || cRes || []);
-      setDoctors(dRes.results || dRes || []);
-      setDepartments(deptRes.results || deptRes || []);
-      setSpecializations(specRes.results || specRes || []);
-      setAppointments(aptRes.results || aptRes || []);
+      const clinicsList = cRes.results || cRes || [];
+      const doctorsList = dRes.results || dRes || [];
+      const deptsList = deptRes.results || deptRes || [];
+      const specsList = specRes.results || specRes || [];
+      const aptsList = aptRes.results || aptRes || [];
+
+      setClinics(clinicsList);
+      setDoctors(doctorsList);
+      setDepartments(deptsList);
+      setSpecializations(specsList);
+      setAppointments(aptsList);
+
+      if (statsRes?.data) {
+        setTotalAppointmentsCount(statsRes.data.total ?? (aptRes.count || aptsList.length));
+        if (statsRes.data.breakdown) {
+          setAppointmentStats(statsRes.data.breakdown);
+        }
+      } else {
+        setTotalAppointmentsCount(aptRes.count || aptsList.length);
+        const fallbackCounts = aptsList.reduce((acc, apt) => {
+          acc[apt.status] = (acc[apt.status] || 0) + 1;
+          return acc;
+        }, { PENDING: 0, CONFIRMED: 0, COMPLETED: 0, CANCELLED: 0 });
+        setAppointmentStats(fallbackCounts);
+      }
     } catch {
       setError("Failed to load data.");
     } finally {
@@ -119,10 +147,7 @@ export default function SuperAdminDashboard() {
     { key: "taxonomy", label: "Depts & Specializations", icon: <Award size={16} /> },
   ];
 
-  const statusCounts = appointments.reduce((acc, apt) => {
-    acc[apt.status] = (acc[apt.status] || 0) + 1;
-    return acc;
-  }, {});
+  const statusCounts = appointmentStats;
 
   return (
     <div className="space-y-6">
@@ -186,7 +211,7 @@ export default function SuperAdminDashboard() {
             {[
               { label: "Total Clinics", value: clinics.length, icon: <Building2 size={24} />, color: "primary" },
               { label: "Registered Doctors", value: doctors.length, icon: <Stethoscope size={24} />, color: "secondary" },
-              { label: "Total Appointments", value: appointments.length, icon: <Calendar size={24} />, color: "accent" },
+              { label: "Total Appointments", value: totalAppointmentsCount || appointments.length, icon: <Calendar size={24} />, color: "accent" },
               { label: "Specializations", value: specializations.length, icon: <Award size={24} />, color: "info" },
             ].map((s) => (
               <div key={s.label} className="p-5 bg-base-100 border border-base-200 rounded-2xl shadow-sm flex items-center gap-3">
@@ -442,7 +467,7 @@ export default function SuperAdminDashboard() {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-extrabold text-base-content flex items-center gap-2">
-              <Calendar className="text-primary" /> All Appointments ({appointments.length})
+              <Calendar className="text-primary" /> All Appointments ({totalAppointmentsCount || appointments.length})
             </h2>
           </div>
           {appointments.length === 0 ? (
