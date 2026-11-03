@@ -107,7 +107,7 @@ export default function DashboardLayout() {
     switch (role) {
       case "ADMIN":
         return (
-          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
+          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-50 text-[#1e3a8a] border border-blue-200">
             Super Admin
           </span>
         );
