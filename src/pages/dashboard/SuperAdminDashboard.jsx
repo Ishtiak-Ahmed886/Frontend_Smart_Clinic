@@ -54,11 +54,11 @@ export default function SuperAdminDashboard() {
       setSpecializations(specsList);
       setAppointments(aptsList);
 
-      if (statsRes?.data) {
-        setTotalAppointmentsCount(statsRes.data.total ?? (aptRes.count || aptsList.length));
-        if (statsRes.data.breakdown) {
-          setAppointmentStats(statsRes.data.breakdown);
-        }
+      // Note: apiClient unwraps response.data.data directly!
+      const stats = statsRes?.breakdown ? statsRes : statsRes?.data;
+      if (stats?.breakdown) {
+        setTotalAppointmentsCount(stats.total ?? (aptRes.count || aptsList.length));
+        setAppointmentStats(stats.breakdown);
       } else {
         setTotalAppointmentsCount(aptRes.count || aptsList.length);
         const fallbackCounts = aptsList.reduce((acc, apt) => {
