@@ -117,6 +117,17 @@ export default function ReceptionistPanel() {
   // Token print & reprint modal state
   const [printTokenData, setPrintTokenData] = useState(null);
 
+  // Rollover state
+  const [rolloverModalOpen, setRolloverModalOpen] = useState(false);
+  const [rollingOver, setRollingOver] = useState(false);
+  const [rolloverTargetDate, setRolloverTargetDate] = useState("");
+
+  // Individual Reschedule state
+  const [rescheduleModalOpen, setRescheduleModalOpen] = useState(false);
+  const [selectedApptForReschedule, setSelectedApptForReschedule] = useState(null);
+  const [rescheduleForm, setRescheduleForm] = useState({ new_date: "", new_time: "10:00", reason: "" });
+  const [rescheduling, setRescheduling] = useState(false);
+
   // Patient phone lookup state
   const [searchingPatient, setSearchingPatient] = useState(false);
   const [foundPatient, setFoundPatient] = useState(null);
@@ -401,6 +412,67 @@ export default function ReceptionistPanel() {
     }
   };
 
+  // Bulk Rollover Unserved Appointments to Next Chamber Day
+  const handleRolloverUnserved = async () => {
+    if (!selectedDoctorId || !clinicData?.clinic_id) return;
+    setRollingOver(true);
+    try {
+      const payload = {
+        doctor_id: selectedDoctorId,
+        clinic_id: clinicData.clinic_id,
+        session_date: today,
+      };
+      if (rolloverTargetDate) {
+        payload.target_date = rolloverTargetDate;
+      }
+      const res = await apiClient.post("/appointments/rollover/", payload);
+      showMsg(res.message || `Successfully rolled over ${res.count} patient(s) to next session!`);
+      setRolloverModalOpen(false);
+      setRolloverTargetDate("");
+      loadDoctorQueue(selectedDoctorId);
+    } catch (err) {
+      showErr(err?.detail || err?.target_date?.[0] || "Failed to rollover unserved appointments.");
+    } finally {
+      setRollingOver(false);
+    }
+  };
+
+  // Open Individual Reschedule Modal
+  const handleOpenRescheduleModal = (appt) => {
+    setSelectedApptForReschedule(appt);
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    const tomorrowStr = d.toISOString().split("T")[0];
+    setRescheduleForm({
+      new_date: tomorrowStr,
+      new_time: (appt.appointment_time || "10:00").substring(0, 5),
+      reason: "",
+    });
+    setRescheduleModalOpen(true);
+  };
+
+  // Submit Individual Reschedule
+  const handleConfirmReschedule = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!selectedApptForReschedule) return;
+    setRescheduling(true);
+    try {
+      await apiClient.post(`/appointments/${selectedApptForReschedule.id}/reschedule/`, {
+        new_date: rescheduleForm.new_date,
+        new_time: rescheduleForm.new_time,
+        reason: rescheduleForm.reason,
+      });
+      showMsg(`Appointment rescheduled to ${rescheduleForm.new_date} (${rescheduleForm.new_time}) successfully!`);
+      setRescheduleModalOpen(false);
+      setSelectedApptForReschedule(null);
+      loadDoctorQueue(selectedDoctorId);
+    } catch (err) {
+      showErr(err?.detail || err?.new_date?.[0] || err?.new_time?.[0] || "Failed to reschedule appointment.");
+    } finally {
+      setRescheduling(false);
+    }
+  };
+
   const selectedDoctor = useMemo(() => {
     return doctors.find((d) => String(d.id) === String(selectedDoctorId));
   }, [doctors, selectedDoctorId]);
@@ -449,6 +521,12 @@ export default function ReceptionistPanel() {
 
   const emergencyPatientsCount = useMemo(() => {
     return appointments.filter((a) => a.is_emergency).length;
+  }, [appointments]);
+
+  const unservedAppointments = useMemo(() => {
+    return appointments.filter((a) =>
+      ["SCHEDULED", "CONFIRMED", "PENDING"].includes(a.status)
+    );
   }, [appointments]);
 
   const todayFormatted = useMemo(() => {
@@ -543,7 +621,7 @@ export default function ReceptionistPanel() {
         <div className="flex items-center gap-3 sm:gap-6 flex-wrap text-xs">
           {/* Duty Officer */}
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-indigo-50 text-[#283891] border border-indigo-100 flex items-center justify-center font-bold">
+            <div className="w-8 h-8 rounded-xl bg-blue-50 text-[#1e3a8a] border border-blue-100 flex items-center justify-center font-bold">
               <UserCheck size={16} />
             </div>
             <div>
@@ -685,7 +763,7 @@ export default function ReceptionistPanel() {
                 }}
                 className={`p-4 rounded-2xl border transition-all cursor-pointer select-none relative ${
                   isSelected
-                    ? "bg-indigo-50/30 border-[#283891] shadow-xs ring-2 ring-[#283891]/20"
+                    ? "bg-blue-50/30 border-[#1e3a8a] shadow-xs ring-2 ring-[#1e3a8a]/20"
                     : "bg-white border-slate-200/90 hover:border-slate-300 hover:shadow-2xs"
                 }`}
               >
@@ -722,8 +800,8 @@ export default function ReceptionistPanel() {
                       : "Queue Ready"}
                   </span>
                   {isSelected ? (
-                    <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#283891]">
-                      <span className="w-1.5 h-1.5 rounded-full bg-[#283891] animate-pulse" />
+                    <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#1e3a8a]">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#1e3a8a] animate-pulse" />
                       Active Dispatch
                     </span>
                   ) : (
@@ -745,7 +823,7 @@ export default function ReceptionistPanel() {
           onClick={() => setMobileTab("controls")}
           className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${
             mobileTab === "controls"
-              ? "bg-white text-[#283891] shadow-2xs"
+              ? "bg-white text-[#1e3a8a] shadow-2xs"
               : "text-slate-600 hover:text-slate-900"
           }`}
         >
@@ -757,7 +835,7 @@ export default function ReceptionistPanel() {
           onClick={() => setMobileTab("queue")}
           className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${
             mobileTab === "queue"
-              ? "bg-white text-[#283891] shadow-2xs"
+              ? "bg-white text-[#1e3a8a] shadow-2xs"
               : "text-slate-600 hover:text-slate-900"
           }`}
         >
@@ -776,7 +854,7 @@ export default function ReceptionistPanel() {
           {/* Chamber Main Calling Controller */}
           <div className="bg-white border border-slate-200/90 rounded-3xl p-6 shadow-xs relative overflow-hidden space-y-4">
             {/* Top Accent Strip */}
-            <div className="absolute top-0 left-0 right-0 h-1.5 bg-[#283891]" />
+            <div className="absolute top-0 left-0 right-0 h-1.5 bg-[#1e3a8a]" />
 
             {/* Chamber Identification Header */}
             <div className="flex items-center justify-between gap-2 pt-1 border-b border-slate-100 pb-3">
@@ -800,11 +878,11 @@ export default function ReceptionistPanel() {
               <span className="text-[11px] uppercase font-bold text-slate-400 tracking-widest block">
                 Currently In Chamber
               </span>
-              <div className="text-6xl sm:text-7xl font-mono font-black text-[#283891] tracking-tight my-2">
+              <div className="text-6xl sm:text-7xl font-mono font-black text-[#1e3a8a] tracking-tight my-2">
                 #{chamberSession?.current_serial || "--"}
               </div>
               <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white text-slate-600 text-xs font-semibold border border-slate-200 shadow-2xs">
-                <Volume2 size={13} className="text-[#283891]" />
+                <Volume2 size={13} className="text-[#1e3a8a]" />
                 <span>Audio Chime: Main OPD Waiting Hall</span>
               </div>
             </div>
@@ -1023,19 +1101,39 @@ export default function ReceptionistPanel() {
             )}
 
             {isSessionEnded && (
-              <div className="p-3 rounded-2xl bg-slate-100 border border-slate-300 flex items-center justify-between gap-2 text-slate-800 text-xs">
-                <span className="font-bold flex items-center gap-1.5">
-                  <StopCircle size={14} className="text-slate-600" /> Chamber Session
-                  Ended (Locked)
-                </span>
-                <ActionButton
-                  variant="secondary"
-                  size="xs"
-                  loading={updatingChamber}
-                  onClick={() => handleSetChamberStatus("IN_CHAMBER")}
-                >
-                  ▶ Reopen Session
-                </ActionButton>
+              <div className="space-y-2">
+                <div className="p-3 rounded-2xl bg-slate-100 border border-slate-300 flex items-center justify-between gap-2 text-slate-800 text-xs">
+                  <span className="font-bold flex items-center gap-1.5">
+                    <StopCircle size={14} className="text-slate-600" /> Chamber Session
+                    Ended (Locked)
+                  </span>
+                  <ActionButton
+                    variant="secondary"
+                    size="xs"
+                    loading={updatingChamber}
+                    onClick={() => handleSetChamberStatus("IN_CHAMBER")}
+                  >
+                    ▶ Reopen Session
+                  </ActionButton>
+                </div>
+
+                {unservedAppointments.length > 0 && (
+                  <div className="p-3 rounded-2xl bg-amber-50 border border-amber-300 flex items-center justify-between gap-2 text-amber-900 text-xs shadow-2xs">
+                    <div className="flex items-center gap-1.5 font-bold">
+                      <AlertTriangle size={14} className="text-amber-600 shrink-0" />
+                      <span>{unservedAppointments.length} unserved patient(s) remaining</span>
+                    </div>
+                    <ActionButton
+                      variant="primary"
+                      size="xs"
+                      icon={RotateCcw}
+                      loading={rollingOver}
+                      onClick={() => setRolloverModalOpen(true)}
+                    >
+                      Roll Over
+                    </ActionButton>
+                  </div>
+                )}
               </div>
             )}
 
@@ -1043,8 +1141,8 @@ export default function ReceptionistPanel() {
             <div className="pt-2">
               <div className="flex items-center justify-between text-[11px] text-slate-500 mb-1.5 px-0.5 font-medium">
                 <span>Chamber Dispatch</span>
-                <span className="flex items-center gap-1 text-[#283891] font-semibold bg-indigo-50/80 border border-indigo-100 px-2 py-0.5 rounded-md">
-                  <kbd className="px-1 py-0.2 text-[10px] font-bold bg-white border border-indigo-200 rounded shadow-2xs font-mono">F2</kbd> Quick Call
+                <span className="flex items-center gap-1 text-[#1e3a8a] font-semibold bg-blue-50/80 border border-blue-100 px-2 py-0.5 rounded-md">
+                  <kbd className="px-1 py-0.2 text-[10px] font-bold bg-white border border-blue-200 rounded shadow-2xs font-mono">F2</kbd> Quick Call
                 </span>
               </div>
               <ActionButton
@@ -1169,7 +1267,7 @@ export default function ReceptionistPanel() {
                   }
                   className={`py-1.5 px-2 rounded-xl text-xs font-bold border transition-all text-center ${
                     isSessionEnded
-                      ? "bg-[#283891] text-white border-[#283891] shadow-2xs"
+                      ? "bg-[#1e3a8a] text-white border-[#1e3a8a] shadow-2xs"
                       : "bg-white text-rose-700 border-rose-200 hover:bg-rose-50"
                   }`}
                 >
@@ -1197,14 +1295,14 @@ export default function ReceptionistPanel() {
             <div className="grid grid-cols-6 gap-1 h-5 items-end pt-1">
               <div className="bg-slate-200 h-2 rounded-xs" />
               <div className="bg-indigo-200 h-3.5 rounded-xs" />
-              <div className="bg-[#283891] h-5 rounded-xs" />
+              <div className="bg-[#1e3a8a] h-5 rounded-xs" />
               <div className="bg-indigo-200 h-3 rounded-xs" />
               <div className="bg-slate-200 h-1.5 rounded-xs" />
               <div className="bg-slate-100 h-1 rounded-xs" />
             </div>
             <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
               <span className="text-slate-600 font-medium flex items-center gap-1.5">
-                <Volume2 size={13} className="text-[#283891]" /> Token Voice Chime
+                <Volume2 size={13} className="text-[#1e3a8a]" /> Token Voice Chime
               </span>
               <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
                 Bangla + English Active
@@ -1241,7 +1339,7 @@ export default function ReceptionistPanel() {
                     placeholder="Search name, phone, serial..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#283891]/20 focus:border-[#283891] text-slate-900 placeholder:text-slate-400 font-medium"
+                    className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#1e3a8a]/20 focus:border-[#1e3a8a] text-slate-900 placeholder:text-slate-400 font-medium"
                   />
                 </div>
 
@@ -1263,7 +1361,7 @@ export default function ReceptionistPanel() {
                     onClick={() => setFilterTab("waiting")}
                     className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
                       filterTab === "waiting"
-                        ? "bg-white text-[#283891] shadow-2xs"
+                        ? "bg-white text-[#1e3a8a] shadow-2xs"
                         : "text-slate-600 hover:text-slate-900"
                     }`}
                   >
@@ -1326,7 +1424,7 @@ export default function ReceptionistPanel() {
                     key={a.id}
                     className={`transition-colors ${
                       isServing
-                        ? "bg-indigo-50/40 font-semibold"
+                        ? "bg-blue-50/40 font-semibold"
                         : "hover:bg-slate-50/70"
                     }`}
                   >
@@ -1335,7 +1433,7 @@ export default function ReceptionistPanel() {
                       <div className="flex items-center gap-1.5">
                         <span>#{a.serial_number}</span>
                         {isServing && (
-                          <span className="w-2 h-2 rounded-full bg-[#283891] animate-ping" />
+                          <span className="w-2 h-2 rounded-full bg-[#1e3a8a] animate-ping" />
                         )}
                       </div>
                     </td>
@@ -1439,10 +1537,21 @@ export default function ReceptionistPanel() {
                         >
                           <AlertTriangle size={13} />
                         </button>
+                        {/* Reschedule Button */}
+                        {["SCHEDULED", "CONFIRMED", "PENDING"].includes(a.status) && (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenRescheduleModal(a)}
+                            className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-indigo-600 hover:border-indigo-300 hover:bg-indigo-50/50 transition-colors shadow-2xs"
+                            title="Reschedule to another date/time"
+                          >
+                            <Calendar size={13} />
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => setPrintTokenData(a)}
-                          className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-[#283891] hover:border-indigo-300 hover:bg-indigo-50/50 transition-colors shadow-2xs"
+                          className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-[#1e3a8a] hover:border-indigo-300 hover:bg-blue-50/50 transition-colors shadow-2xs"
                           title="Print Thermal Token Slip"
                         >
                           <Printer size={13} />
@@ -1499,7 +1608,7 @@ export default function ReceptionistPanel() {
 
           {/* Audit Verification */}
           <div className="flex items-center gap-2.5 pl-0 sm:pl-6 sm:border-l sm:border-slate-200">
-            <div className="w-9 h-9 rounded-xl bg-indigo-50 text-[#283891] border border-indigo-100 flex items-center justify-center font-bold">
+            <div className="w-9 h-9 rounded-xl bg-blue-50 text-[#1e3a8a] border border-blue-100 flex items-center justify-center font-bold">
               <RefreshCw size={16} />
             </div>
             <div>
@@ -1576,7 +1685,7 @@ export default function ReceptionistPanel() {
                   fee: doc?.consultation_fee || 800,
                 }));
               }}
-              className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#283891]/20 focus:border-[#283891] text-slate-900 font-semibold"
+              className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#1e3a8a]/20 focus:border-[#1e3a8a] text-slate-900 font-semibold"
               required
             >
               <option value="">Select Chamber / Doctor</option>
@@ -1600,7 +1709,7 @@ export default function ReceptionistPanel() {
               onChange={(e) =>
                 setWalkInForm({ ...walkInForm, patient_name: e.target.value })
               }
-              className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#283891]/20 focus:border-[#283891] text-slate-900 font-medium"
+              className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#1e3a8a]/20 focus:border-[#1e3a8a] text-slate-900 font-medium"
               required
             />
           </div>
@@ -1611,7 +1720,7 @@ export default function ReceptionistPanel() {
                 <span className="flex items-center justify-between">
                   <span>Phone Number</span>
                   {searchingPatient && (
-                    <span className="text-[10px] text-[#283891] font-normal">
+                    <span className="text-[10px] text-[#1e3a8a] font-normal">
                       Searching...
                     </span>
                   )}
@@ -1627,7 +1736,7 @@ export default function ReceptionistPanel() {
                     patient_phone: e.target.value,
                   })
                 }
-                className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#283891]/20 focus:border-[#283891] text-slate-900 font-medium"
+                className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#1e3a8a]/20 focus:border-[#1e3a8a] text-slate-900 font-medium"
               />
               {foundPatient && (
                 <div className="mt-1.5 p-2 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] flex items-center gap-1.5">
@@ -1649,7 +1758,7 @@ export default function ReceptionistPanel() {
                 onChange={(e) =>
                   setWalkInForm({ ...walkInForm, fee: e.target.value })
                 }
-                className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#283891]/20 focus:border-[#283891] text-emerald-700 font-bold font-mono"
+                className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#1e3a8a]/20 focus:border-[#1e3a8a] text-emerald-700 font-bold font-mono"
               />
             </div>
           </div>
@@ -1668,7 +1777,7 @@ export default function ReceptionistPanel() {
                   problem_description: e.target.value,
                 })
               }
-              className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#283891]/20 focus:border-[#283891] text-slate-900 font-medium"
+              className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#1e3a8a]/20 focus:border-[#1e3a8a] text-slate-900 font-medium"
             />
           </div>
 
@@ -1836,6 +1945,166 @@ export default function ReceptionistPanel() {
             </strong>
           </div>
         </div>
+      </ModalShell>
+
+      {/* ================= MODAL: ROLLOVER UNSERVED APPOINTMENTS ================= */}
+      <ModalShell
+        isOpen={rolloverModalOpen}
+        onClose={() => setRolloverModalOpen(false)}
+        title="🔄 Roll Over Unserved Patients to Next Chamber"
+        subtitle={`Automatically migrate remaining patients to Dr. ${selectedDoctor?.full_name || "Doctor"}'s next chamber day.`}
+        size="md"
+        footer={
+          <div className="flex items-center justify-end gap-2 w-full">
+            <ActionButton
+              variant="outline"
+              size="sm"
+              onClick={() => setRolloverModalOpen(false)}
+              disabled={rollingOver}
+            >
+              Cancel
+            </ActionButton>
+            <ActionButton
+              variant="primary"
+              size="sm"
+              icon={RotateCcw}
+              loading={rollingOver}
+              onClick={handleRolloverUnserved}
+            >
+              Confirm Rollover ({unservedAppointments.length} Patients)
+            </ActionButton>
+          </div>
+        }
+      >
+        <div className="space-y-4 py-1 text-xs text-slate-700">
+          <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-1.5">
+            <p className="font-bold text-amber-900 flex items-center gap-1.5">
+              <AlertTriangle size={14} className="text-amber-600 shrink-0" />
+              {unservedAppointments.length} unserved patient(s) from today's session
+            </p>
+            <p className="text-amber-800 leading-relaxed text-[11px]">
+              This action will automatically reschedule all unserved patients to the doctor's next available chamber session according to their schedule.
+            </p>
+          </div>
+
+          <div className="space-y-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
+            <h4 className="font-bold text-slate-800 text-[11px] uppercase tracking-wider">Operational Invariants & Guarantees:</h4>
+            <ul className="list-disc pl-4 space-y-1 text-slate-600 text-[11px]">
+              <li><strong>Monotonic Serials:</strong> New tokens will be assigned starting after existing bookings on the next date.</li>
+              <li><strong>Payment Preservation:</strong> Original consultation fees & transaction IDs remain intact. Patients are NOT charged again.</li>
+              <li><strong>Automated Patient SMS:</strong> Every patient receives an immediate SMS with their new date, slot time, and token number.</li>
+            </ul>
+          </div>
+
+          <div>
+            <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">
+              Custom Target Date (Optional)
+            </label>
+            <input
+              type="date"
+              value={rolloverTargetDate}
+              min={new Date(Date.now() + 86400000).toISOString().split("T")[0]}
+              onChange={(e) => setRolloverTargetDate(e.target.value)}
+              className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-1 focus:ring-[#1e3a8a] outline-none font-medium"
+            />
+            <p className="text-[10px] text-slate-400 mt-1">
+              Leave blank to automatically detect the doctor's next scheduled chamber day (skipping leaves).
+            </p>
+          </div>
+        </div>
+      </ModalShell>
+
+      {/* ================= MODAL: RESCHEDULE INDIVIDUAL APPOINTMENT ================= */}
+      <ModalShell
+        isOpen={rescheduleModalOpen && !!selectedApptForReschedule}
+        onClose={() => {
+          setRescheduleModalOpen(false);
+          setSelectedApptForReschedule(null);
+        }}
+        title="🗓️ Reschedule Appointment"
+        subtitle={`Reschedule ${selectedApptForReschedule?.patient_name || selectedApptForReschedule?.patient?.full_name || "Patient"}'s booking.`}
+        size="sm"
+        footer={
+          <div className="flex items-center justify-end gap-2 w-full">
+            <ActionButton
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setRescheduleModalOpen(false);
+                setSelectedApptForReschedule(null);
+              }}
+              disabled={rescheduling}
+            >
+              Cancel
+            </ActionButton>
+            <ActionButton
+              variant="primary"
+              size="sm"
+              icon={Calendar}
+              loading={rescheduling}
+              onClick={handleConfirmReschedule}
+            >
+              Confirm Reschedule
+            </ActionButton>
+          </div>
+        }
+      >
+        <form onSubmit={handleConfirmReschedule} className="space-y-3.5 py-1 text-xs">
+          <div className="bg-blue-50/60 border border-blue-200 rounded-xl p-3 text-slate-700 space-y-1">
+            <div className="flex justify-between items-center text-[11px]">
+              <span className="font-semibold text-slate-500">Current Token:</span>
+              <span className="font-bold font-mono text-[#1e3a8a]">Serial #{selectedApptForReschedule?.serial_number}</span>
+            </div>
+            <div className="flex justify-between items-center text-[11px]">
+              <span className="font-semibold text-slate-500">Scheduled Time:</span>
+              <span className="font-medium text-slate-700">{selectedApptForReschedule?.appointment_date} at {selectedApptForReschedule?.appointment_time}</span>
+            </div>
+            <div className="flex justify-between items-center text-[11px]">
+              <span className="font-semibold text-slate-500">Payment Status:</span>
+              <span className="font-bold text-emerald-700">Fee Preserved (Paid)</span>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
+              New Appointment Date *
+            </label>
+            <input
+              type="date"
+              required
+              value={rescheduleForm.new_date}
+              min={new Date().toISOString().split("T")[0]}
+              onChange={(e) => setRescheduleForm({ ...rescheduleForm, new_date: e.target.value })}
+              className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-1 focus:ring-[#1e3a8a] outline-none font-medium"
+            />
+          </div>
+
+          <div>
+            <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
+              New Consultation Time *
+            </label>
+            <input
+              type="time"
+              required
+              value={rescheduleForm.new_time}
+              onChange={(e) => setRescheduleForm({ ...rescheduleForm, new_time: e.target.value })}
+              className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-1 focus:ring-[#1e3a8a] outline-none font-medium"
+            />
+          </div>
+
+          <div>
+            <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
+              Reason / Reception Note
+            </label>
+            <input
+              type="text"
+              placeholder="e.g. Doctor session ended early, patient requested tomorrow"
+              value={rescheduleForm.reason}
+              onChange={(e) => setRescheduleForm({ ...rescheduleForm, reason: e.target.value })}
+              className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-1 focus:ring-[#1e3a8a] outline-none font-medium"
+            />
+          </div>
+        </form>
       </ModalShell>
 
       {/* ================= MODAL: 76mm THERMAL TOKEN PRINT ================= */}
