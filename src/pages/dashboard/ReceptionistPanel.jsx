@@ -226,15 +226,75 @@ export default function ReceptionistPanel() {
     loadInitialData();
   }, []);
 
+  // Live Real-Time Queue Helpers
+  const currentServingPatient = useMemo(() => {
+    const s = chamberSession?.current_serial;
+    const skipped = chamberSession?.skipped_serials || [];
+    if (!s || skipped.includes(s)) return null;
+    return appointments.find(
+      (a) => a.serial_number === s && a.status !== "COMPLETED" && a.status !== "CANCELLED"
+    );
+  }, [chamberSession, appointments]);
+
+  const nextSerialCandidate = useMemo(() => {
+    if (chamberSession?.next_serials && chamberSession.next_serials.length > 0) {
+      return chamberSession.next_serials[0];
+    }
+    const curr = chamberSession?.current_serial || 0;
+    const skipped = chamberSession?.skipped_serials || [];
+    const waiting = appointments
+      .filter(
+        (a) =>
+          !a.is_emergency &&
+          a.serial_number > curr &&
+          ["CONFIRMED", "PENDING"].includes(a.status) &&
+          !skipped.includes(a.serial_number)
+      )
+      .sort((a, b) => a.serial_number - b.serial_number);
+    return waiting.length > 0 ? waiting[0].serial_number : null;
+  }, [chamberSession, appointments]);
+
+  const isSlotStarted = useMemo(() => {
+    if (chamberSession?.is_slot_started !== undefined) {
+      return chamberSession.is_slot_started;
+    }
+    return true;
+  }, [chamberSession]);
+
+  const slotLockReason = useMemo(() => {
+    if (chamberSession?.slot_lock_reason) return chamberSession.slot_lock_reason;
+    if (!isSlotStarted) {
+      return chamberSession?.schedule_start_time
+        ? `Chamber slot starts at ${chamberSession.schedule_start_time}.`
+        : "Doctor's chamber slot has not started yet.";
+    }
+    return null;
+  }, [chamberSession, isSlotStarted]);
+
   useEffect(() => {
     if (selectedDoctorId) {
       loadDoctorQueue(selectedDoctorId);
     }
   }, [selectedDoctorId, clinicData]);
 
+  // Real-time synchronization: Poll doctor queue every 5s when tab is active
+  useEffect(() => {
+    if (!selectedDoctorId) return;
+    const interval = setInterval(() => {
+      if (typeof document === "undefined" || document.visibilityState === "visible") {
+        loadDoctorQueue(selectedDoctorId);
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [selectedDoctorId, clinicData]);
+
   // Queue Action Handler
   const handleQueueAction = async (action, targetSerial = null, extraPayload = {}) => {
     if (!selectedDoctorId || !clinicData?.clinic_id) return;
+    if (["NEXT_SERIAL", "SKIP_SERIAL", "RECALL_SERIAL", "SET_SERIAL"].includes(action) && !isSlotStarted) {
+      showErr(slotLockReason || "Doctor's chamber slot has not started yet.");
+      return;
+    }
     setUpdatingChamber(true);
     try {
       const today = new Date().toISOString().split("T")[0];
@@ -253,7 +313,7 @@ export default function ReceptionistPanel() {
       showMsg(`Queue updated: ${action.replace("_", " ")}`);
       loadDoctorQueue(selectedDoctorId);
     } catch (err) {
-      showErr(err?.response?.data?.error || err?.detail || "Action failed.");
+      showErr(err?.response?.data?.detail || err?.response?.data?.error || err?.detail || "Action failed.");
     } finally {
       setUpdatingChamber(false);
     }
@@ -266,14 +326,22 @@ export default function ReceptionistPanel() {
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       if (e.key === "F2") {
         e.preventDefault();
-        if (selectedDoctorId && !updatingChamber) {
+        if (!isSlotStarted) {
+          showErr(slotLockReason || "Doctor's chamber slot has not started yet.");
+          return;
+        }
+        if (selectedDoctorId && !updatingChamber && nextSerialCandidate) {
+          if (currentServingPatient && !currentServingPatient.has_prescription) {
+            showErr(`Doctor has not issued digital prescription for Serial #${currentServingPatient.serial_number} yet.`);
+            return;
+          }
           handleQueueAction("NEXT_SERIAL");
         }
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedDoctorId, updatingChamber, clinicData]);
+  }, [selectedDoctorId, updatingChamber, clinicData, nextSerialCandidate]);
 
   // Toggle Emergency Status
   const handleToggleEmergency = async (apt) => {
@@ -339,6 +407,9 @@ export default function ReceptionistPanel() {
   // Walk-in Submit
   const handleWalkInSubmit = async (e) => {
     e.preventDefault();
+    if (isSessionEnded) {
+      return showErr("Chamber session has ended. Reopen session before registering walk-in patients.");
+    }
     if (!walkInForm.patient_name || !walkInForm.doctor_id) {
       return showErr("Patient name and Doctor are required.");
     }
@@ -391,6 +462,21 @@ export default function ReceptionistPanel() {
         appointment_id: selectedApptForCash.id,
         amount: parseFloat(cashAmount),
       });
+
+      // Optimistically update appointment row in state
+      setAppointments((prev) =>
+        prev.map((item) =>
+          item.id === selectedApptForCash.id
+            ? {
+                ...item,
+                status: "CONFIRMED",
+                is_arrived: true,
+                arrived_at: item.arrived_at || new Date().toISOString(),
+                amount: parseFloat(cashAmount),
+              }
+            : item
+        )
+      );
       showMsg(
         `Cash payment of ৳${cashAmount} recorded by ${
           user?.full_name || "Receptionist"
@@ -498,14 +584,6 @@ export default function ReceptionistPanel() {
     });
   }, [appointments, searchQuery, filterTab, chamberSession]);
 
-  const currentServingPatient = useMemo(() => {
-    const s = chamberSession?.current_serial;
-    if (!s) return null;
-    return appointments.find((a) => a.serial_number === s);
-  }, [chamberSession, appointments]);
-
-  const nextSerialCandidate = (chamberSession?.current_serial || 0) + 1;
-
   // Key KPI Calculations
   const waitingPatientsCount = useMemo(() => {
     return appointments.filter(
@@ -608,7 +686,13 @@ export default function ReceptionistPanel() {
               variant="primary"
               size="sm"
               icon={Plus}
-              onClick={() => setWalkInModalOpen(true)}
+              onClick={() => {
+                if (isSessionEnded) {
+                  showErr("Chamber session has ended. Reopen session before registering walk-ins.");
+                  return;
+                }
+                setWalkInModalOpen(true);
+              }}
             >
               <span>+ Register Walk-in</span>
             </ActionButton>
@@ -1145,20 +1229,42 @@ export default function ReceptionistPanel() {
                   <kbd className="px-1 py-0.2 text-[10px] font-bold bg-white border border-blue-200 rounded shadow-2xs font-mono">F2</kbd> Quick Call
                 </span>
               </div>
+              {/* Slot Not Started Warning */}
+              {!isSlotStarted && (
+                <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl text-xs font-semibold">
+                  <Clock size={16} className="text-amber-600 shrink-0" />
+                  <span>{slotLockReason || "Doctor's chamber slot has not started yet. Patient calling is locked until chamber starts."}</span>
+                </div>
+              )}
+
               <ActionButton
                 variant="primary"
                 size="lg"
                 loading={updatingChamber}
                 disabled={
+                  !isSlotStarted ||
                   hasActiveEmergency ||
                   hasHeldPatient ||
                   isPrayerBreak ||
-                  isSessionEnded
+                  isSessionEnded ||
+                  !nextSerialCandidate
                 }
-                onClick={() => handleQueueAction("NEXT_SERIAL")}
-                className="w-full justify-center shadow-sm"
+                onClick={() => {
+                  if (!isSlotStarted) {
+                    showErr(slotLockReason || "Doctor's chamber slot has not started yet.");
+                    return;
+                  }
+                  if (currentServingPatient && !currentServingPatient.has_prescription) {
+                    showErr(`Doctor has not issued digital prescription for Serial #${currentServingPatient.serial_number} yet. Waiting for prescription before calling next patient.`);
+                    return;
+                  }
+                  handleQueueAction("NEXT_SERIAL");
+                }}
+                className={`w-full justify-center shadow-sm ${!isSlotStarted ? "opacity-60 cursor-not-allowed" : ""}`}
                 title={
-                  isSessionEnded
+                  !isSlotStarted
+                    ? (slotLockReason || "Chamber slot has not started yet.")
+                    : isSessionEnded
                     ? "Chamber session has ended. Reopen session before calling next patient."
                     : isPrayerBreak
                     ? "Chamber is on Prayer Break. Resume 'In Chamber' before calling next patient."
@@ -1166,11 +1272,19 @@ export default function ReceptionistPanel() {
                     ? "Cannot call next serial while an emergency patient is in chamber."
                     : hasHeldPatient
                     ? "Resume held patient first."
-                    : `Call Next Patient (#${nextSerialCandidate})`
+                    : nextSerialCandidate
+                    ? `Call Next Patient (#${nextSerialCandidate})`
+                    : "All waiting patients have been called."
                 }
               >
-                <FastForward size={18} />
-                <span>CALL NEXT PATIENT (#{nextSerialCandidate})</span>
+                {!isSlotStarted ? <Lock size={18} /> : <FastForward size={18} />}
+                <span>
+                  {!isSlotStarted
+                    ? `CHAMBER NOT STARTED (${chamberSession?.schedule_start_time ? `STARTS ${chamberSession.schedule_start_time}` : "LOCKED"})`
+                    : nextSerialCandidate
+                    ? `CALL NEXT PATIENT (#${nextSerialCandidate})`
+                    : "ALL PATIENTS CALLED (QUEUE COMPLETE)"}
+                </span>
               </ActionButton>
             </div>
 
@@ -1180,7 +1294,8 @@ export default function ReceptionistPanel() {
                 variant="warning"
                 size="sm"
                 disabled={
-                  !chamberSession?.current_serial ||
+                  !isSlotStarted ||
+                  !nextSerialCandidate ||
                   hasActiveEmergency ||
                   hasHeldPatient ||
                   isPrayerBreak ||
@@ -1190,7 +1305,9 @@ export default function ReceptionistPanel() {
                 onClick={() => handleQueueAction("SKIP_SERIAL")}
                 icon={Pause}
                 title={
-                  isSessionEnded
+                  !nextSerialCandidate
+                    ? "No waiting patients left to skip"
+                    : isSessionEnded
                     ? "Session ended"
                     : isPrayerBreak
                     ? "On prayer break"

@@ -243,6 +243,16 @@ export default function PatientQueueTracker() {
               </div>
             </div>
           </div>
+        ) : appointment.status === "COMPLETED" ? (
+          <div className="p-4 rounded-2xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs flex items-center gap-3">
+            <CheckCircle2 size={22} className="shrink-0 text-emerald-400" />
+            <div>
+              <div className="font-bold text-white text-sm">Consultation Completed ✅</div>
+              <div className="text-emerald-200 mt-0.5">
+                Your consultation has been successfully completed. You can view your digital prescription and test records in your patient dashboard.
+              </div>
+            </div>
+          </div>
         ) : isPassed ? (
           <div className="p-4 rounded-2xl bg-amber-500/15 border border-amber-500/40 text-amber-300 text-xs flex items-center gap-3">
             <AlertTriangle size={20} className="shrink-0 text-amber-400" />
